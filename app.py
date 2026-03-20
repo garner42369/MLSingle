@@ -2,9 +2,12 @@ import streamlit as st
 import pandas as pd
 import time
 import threading
-import multiprocessing
 import uuid
+import os
 import model_training
+
+# 提升上传文件大小限制相关的提示（实际限制需在 config.toml 中配置，但可通过代码给用户提示）
+# st.set_page_config 必须是第一个调用的 st 函数
 
 # 全局并发控制 (使用 streamlit 的 cache_resource 来保证跨 session 共享)
 @st.cache_resource
@@ -46,6 +49,7 @@ if st.sidebar.button("🗑️ 清除缓存数据"):
     st.sidebar.success("缓存数据已清除！")
     st.rerun()
 
+st.sidebar.markdown("<small>提示：如果云端上传失败，请确保文件不超过限制，并尝试刷新页面重试。</small>", unsafe_allow_html=True)
 uploaded_file = st.sidebar.file_uploader("上传您的数据集 (CSV 或 Excel)", type=["csv", "xlsx"])
 
 # 只有当用户上传了文件才继续
