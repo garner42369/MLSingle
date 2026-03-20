@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from xgboost import XGBRegressor
+from catboost import CatBoostRegressor
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 def calculate_vif(df, target_column):
@@ -51,9 +52,12 @@ def generate_correlation_matrix(df, target_column, session_id=""):
     
     return corr_matrix, fig_path
 
-def train_and_evaluate(model, model_name, X_train, X_test, y_train, y_test, feature_names, session_id=""):
+def train_and_evaluate(model, model_name, X_train, X_test, y_train, y_test, feature_names, session_id="", cat_features=None, text_features=None):
     # 训练模型
-    model.fit(X_train, y_train)
+    if model_name == "CatBoost":
+        model.fit(X_train, y_train, cat_features=cat_features, text_features=text_features, verbose=False)
+    else:
+        model.fit(X_train, y_train)
     
     # 预测
     y_train_pred = model.predict(X_train)
@@ -120,7 +124,7 @@ def train_and_evaluate(model, model_name, X_train, X_test, y_train, y_test, feat
     
     return metrics, feature_importances, fig_path
 
-def run_training_pipeline(df, target_column, selected_models, model_params, session_id="", test_size=0.2):
+def run_training_pipeline(df, target_column, selected_model, model_params, session_id="", test_size=0.2):
     """
     运行训练流水线：划分数据集、根据选择训练模型、返回评估指标和图表路径
     """
@@ -134,7 +138,7 @@ def run_training_pipeline(df, target_column, selected_models, model_params, sess
 
     results = {}
 
-    if 'Random Forest' in selected_models:
+    if selected_model == 'Random Forest':
         params = model_params.get('Random Forest', {})
         n_estimators = params.get('n_estimators', 100)
         max_depth = params.get('max_depth', None)
@@ -142,7 +146,7 @@ def run_training_pipeline(df, target_column, selected_models, model_params, sess
         rf_metrics, rf_importance, rf_fig = train_and_evaluate(rf_model, "Random Forest", X_train, X_test, y_train, y_test, feature_names, session_id)
         results['rf'] = {'metrics': rf_metrics, 'importance': rf_importance, 'fig_path': rf_fig}
 
-    if 'XGBoost' in selected_models:
+    elif selected_model == 'XGBoost':
         params = model_params.get('XGBoost', {})
         n_estimators = params.get('n_estimators', 100)
         max_depth = params.get('max_depth', 6)
@@ -150,5 +154,32 @@ def run_training_pipeline(df, target_column, selected_models, model_params, sess
         xgb_model = XGBRegressor(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate, random_state=42)
         xgb_metrics, xgb_importance, xgb_fig = train_and_evaluate(xgb_model, "XGBoost", X_train, X_test, y_train, y_test, feature_names, session_id)
         results['xgb'] = {'metrics': xgb_metrics, 'importance': xgb_importance, 'fig_path': xgb_fig}
+
+    elif selected_model == 'CatBoost':
+        params = model_params.get('CatBoost', {})
+        iterations = params.get('iterations', 100)
+        depth = params.get('depth', 6)
+        learning_rate = params.get('learning_rate', 0.1)
+        cat_features = params.get('cat_features', [])
+        text_features = params.get('text_features', [])
+        
+        # 将空列表转换为 None，符合 catboost 的参数要求
+        cat_features = cat_features if cat_features else None
+        text_features = text_features if text_features else None
+        
+        # 确保传入的类别特征是字符串类型
+        if cat_features:
+            for col in cat_features:
+                X_train[col] = X_train[col].astype(str)
+                X_test[col] = X_test[col].astype(str)
+                
+        if text_features:
+            for col in text_features:
+                X_train[col] = X_train[col].astype(str)
+                X_test[col] = X_test[col].astype(str)
+
+        cb_model = CatBoostRegressor(iterations=iterations, depth=depth, learning_rate=learning_rate, random_state=42)
+        cb_metrics, cb_importance, cb_fig = train_and_evaluate(cb_model, "CatBoost", X_train, X_test, y_train, y_test, feature_names, session_id, cat_features=cat_features, text_features=text_features)
+        results['cb'] = {'metrics': cb_metrics, 'importance': cb_importance, 'fig_path': cb_fig}
 
     return results

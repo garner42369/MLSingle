@@ -91,25 +91,24 @@ if uploaded_file is not None:
         st.sidebar.divider()
         st.sidebar.header("⚙️ 模型设置")
         
-        # 模型选择
-        available_models = ["Random Forest", "XGBoost"]
-        selected_models = st.sidebar.multiselect("请选择要训练的模型", options=available_models, default=available_models)
+        # 模型选择改为单选
+        available_models = ["Random Forest", "XGBoost", "CatBoost"]
+        selected_model = st.sidebar.selectbox("请选择要训练的模型 (单选)", options=available_models)
         
         model_params = {}
         
         # 动态参数选择
-        if "Random Forest" in selected_models:
+        if selected_model == "Random Forest":
             st.sidebar.subheader("Random Forest 参数")
             rf_n_estimators = st.sidebar.slider("树的数量 (n_estimators) [RF]", min_value=1, max_value=500, value=100, step=1)
             rf_max_depth = st.sidebar.slider("最大深度 (max_depth) [RF]", min_value=1, max_value=50, value=10, step=1)
-            # 为了允许不限制深度，可以用个复选框
             rf_limit_depth = st.sidebar.checkbox("限制最大深度 [RF]", value=False)
             model_params["Random Forest"] = {
                 "n_estimators": rf_n_estimators,
                 "max_depth": rf_max_depth if rf_limit_depth else None
             }
             
-        if "XGBoost" in selected_models:
+        elif selected_model == "XGBoost":
             st.sidebar.subheader("XGBoost 参数")
             xgb_n_estimators = st.sidebar.slider("树的数量 (n_estimators) [XGB]", min_value=1, max_value=500, value=100, step=1)
             xgb_max_depth = st.sidebar.slider("最大深度 (max_depth) [XGB]", min_value=1, max_value=20, value=6, step=1)
@@ -118,6 +117,28 @@ if uploaded_file is not None:
                 "n_estimators": xgb_n_estimators,
                 "max_depth": xgb_max_depth,
                 "learning_rate": xgb_learning_rate
+            }
+            
+        elif selected_model == "CatBoost":
+            st.sidebar.subheader("CatBoost 参数")
+            cb_iterations = st.sidebar.slider("迭代次数/树的数量 (iterations) [CB]", min_value=1, max_value=1000, value=100, step=10)
+            cb_depth = st.sidebar.slider("树的深度 (depth) [CB]", min_value=1, max_value=16, value=6, step=1)
+            cb_learning_rate = st.sidebar.number_input("学习率 (learning_rate) [CB]", min_value=0.01, max_value=1.0, value=0.1, step=0.01)
+            
+            st.sidebar.markdown("**特征类型指定 (可选)**")
+            # 供选择的特征列（排除因变量）
+            feature_columns = [col for col in columns if col != target_column]
+            
+            cat_features = st.sidebar.multiselect("选择类别型变量 (Categorical Features)", options=feature_columns)
+            # 文本变量不能和类别变量重复，做个简单的提示或过滤
+            text_features = st.sidebar.multiselect("选择文本型变量 (Text Features)", options=[col for col in feature_columns if col not in cat_features])
+            
+            model_params["CatBoost"] = {
+                "iterations": cb_iterations,
+                "depth": cb_depth,
+                "learning_rate": cb_learning_rate,
+                "cat_features": cat_features,
+                "text_features": text_features
             }
 
         st.sidebar.divider()
@@ -142,8 +163,8 @@ if uploaded_file is not None:
             st.dataframe(df.head(10))
             
         if start_training:
-            if not selected_models:
-                st.sidebar.warning("请至少选择一个模型进行训练！")
+            if not selected_model:
+                st.sidebar.warning("请选择一个模型进行训练！")
             else:
                 can_train = False
                 with global_lock:
@@ -153,9 +174,9 @@ if uploaded_file is not None:
 
                 if can_train:
                     try:
-                        with st.spinner("正在训练模型，请稍候...可以点击 '终止训练' 取消"):
+                        with st.spinner(f"正在训练 {selected_model} 模型，请稍候...可以点击 '终止训练' 取消"):
                             # 运行训练流水线，传递 session_id 生成唯一文件
-                            results = model_training.run_training_pipeline(df, target_column, selected_models, model_params, st.session_state['session_id'], test_size)
+                            results = model_training.run_training_pipeline(df, target_column, selected_model, model_params, st.session_state['session_id'], test_size)
                             st.session_state['training_results'] = results
                             st.success("模型训练完成！(结果将在 5 分钟后自动清除)")
                             
@@ -252,3 +273,26 @@ if 'training_results' in st.session_state:
         xgb_df = pd.DataFrame(results['xgb']['importance'])
         xgb_df.index = xgb_df.index + 1
         st.dataframe(xgb_df.rename(columns={'features': '特征名', 'importances': '重要性得分'}), use_container_width=True)
+
+        st.divider()
+
+    # 3. CatBoost部分
+    if 'cb' in results:
+        st.header("3. CatBoost")
+        st.subheader("📊 评估指标")
+
+        st.markdown("**训练集 (Training Set)**")
+        display_metrics(results['cb']['metrics']['train'], "训练集")
+
+        st.markdown("**测试集 (Test Set)**")
+        display_metrics(results['cb']['metrics']['test'], "测试集")
+
+        st.subheader("🏆 特征重要性")
+        
+        st.markdown("**特征重要性图表**")
+        st.image(results['cb']['fig_path'], caption="CatBoost 特征重要性柱状图", use_container_width=True)
+        
+        st.markdown("**特征重要性表格**")
+        cb_df = pd.DataFrame(results['cb']['importance'])
+        cb_df.index = cb_df.index + 1
+        st.dataframe(cb_df.rename(columns={'features': '特征名', 'importances': '重要性得分'}), use_container_width=True)
